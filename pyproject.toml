@@ -8,7 +8,7 @@ version = "0.0.1"
 authors = [
   { name="Artem Dontsov", email="artem@dontsoft.com" },
 ]
-description = "A small example package"
+description = "An implementation to create process visualizations using the Universal Process Notation"
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
@@ -20,3 +20,6 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/dontsoft/python-universalprocessnotation"
 Issues = "https://github.com/dontsoft/python-universalprocessnotation/issues"
+
+# [tool.pytest.ini_options]
+# addopts = ["--import-mode=importlib"]
