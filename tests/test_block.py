@@ -36,14 +36,13 @@ def test_block_attachment():
 def test_block_trigger():
     process = Process("Name")
     block = process.add_block("Block 1")
-    assert block.trigger() is None
-    block.set_trigger("Trigger")
-    assert block.trigger() == "Trigger"
-    block.unset_trigger()
-    assert block.trigger() is None
-    block.set_trigger("Trigger")
-    block.set_trigger("Trigger 2")
-    assert block.trigger() == "Trigger 2"
+    assert block.triggers() is None
+    block.add_trigger("Trigger")
+    assert "Trigger" in block.triggers()
+    block.unset_triggers()
+    assert block.triggers() is None
+    block.set_triggers(["Trigger", "Trigger 2"])
+    assert "Trigger 2" in block.triggers()
 
 def test_block_whos():
     process = Process("Name")

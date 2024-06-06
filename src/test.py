@@ -1,18 +1,62 @@
 import universalprocessnotation
 import universalprocessnotation.process
 
-process = universalprocessnotation.process.Process("Test")
-block1 = process.add_block("Test")
-block2 = process.add_block("Test 2")
-block3 = process.add_block("Test 3")
-block4 = process.add_block("Test 4")
+process = universalprocessnotation.process.Process("Salesforce Example")
 
-block1.set_trigger("Trigger")
-block1.set_attachment(True)
-block1.connect("Because", block2)
-block2.connect("Because 2", block3)
-block3.connect("Because 3", block4)
-block3.connect("Because 4", block2)
-block4.connect_end("Because End")
+progress_lead = process.add_block("Progress lead", "Incoming lead")
+progress_lead.connect_end("Incomplete data")
+progress_lead.add_who("Account", responsible=True, accountable=True)
+progress_lead.add_system("Sales Cloud")
 
-print(block1)
+
+run_campaign = progress_lead.connect_new("Lead", "Run campaign")
+run_campaign.connect_end("outreach")
+run_campaign.connect("Unsubscribe / privacy", progress_lead)
+run_campaign.add_who("Marketing", accountable=True)
+run_campaign.add_system("Marketing Cloud")
+
+sell_to_customer = progress_lead.connect_new("Account & Contact", "Sell to customer")
+sell_to_customer.add_who("Account Exec", responsible=True)
+sell_to_customer.add_system("Sales Cloud")
+sell_to_customer.connect("No opportunity", progress_lead)
+
+forecast_revenue = sell_to_customer.connect_new("Opportunities by date", "Forecast revenue")
+forecast_revenue.add_who("VP Sales", responsible=True)
+forecast_revenue.add_system("Sales Cloud")
+forecast_revenue.connect_end("Forecast")
+
+raise_and_accept_quote = sell_to_customer.connect_new(
+    "Closed opportunity & product", "Raise and accept quote", "Price book")
+raise_and_accept_quote.add_who("Finance administrator", responsible=True)
+raise_and_accept_quote.add_who("Customer", informed=True)
+raise_and_accept_quote.add_system("Revenue Cloud")
+
+raise_and_confirm_order = raise_and_accept_quote.connect_new("Accepted", "Raise and confirm order")
+raise_and_confirm_order.add_who("Customer", accountable=True)
+raise_and_confirm_order.add_system("Revenue Cloud")
+
+ship_product = raise_and_confirm_order.connect_new("Confirmed", "Ship product")
+ship_product.add_who("Manufacturing", responsible=True)
+ship_product.add_system("ERP")
+
+raise_invoice = raise_and_confirm_order.connect_new("Confirmed", "Raise invoice")
+raise_invoice.add_who("Finance administrator", responsible=True)
+raise_invoice.add_system("Revenue Cloud")
+
+raise_payment = ship_product.connect_new("Received", "Raise payment")
+raise_payment.add_who("Customer", responsible=True, accountable=True)
+raise_payment.add_who("Finance administrator",
+                      responsible=True)
+raise_invoice.connect("Invoice", raise_payment)
+
+book_revenue = raise_invoice.connect_new("Invoice", "Book revenue")
+book_revenue.add_who("Finance administrator", responsible=True)
+book_revenue.add_system("Revenue Cloud")
+book_revenue.connect_end("Revenue")
+book_revenue.connect_end("Commission")
+
+ship_product.connect("Received", book_revenue)
+raise_payment.connect("Payment & non-payment", book_revenue)
+
+
+process.to_svg("")
