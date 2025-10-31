@@ -1,5 +1,9 @@
-from typing import TYPE_CHECKING, List, Optional, Dict, Tuple
+from typing import TYPE_CHECKING, List, Optional, Dict
 from enum import IntFlag, auto
+import svg
+import math
+from .util import *
+
 if TYPE_CHECKING:
     from process import Process
 
@@ -33,7 +37,7 @@ class Link:
 
     def __repr__(self):
         return f"Link({self.from_block.activity()} => {self.why} => {self.to_block.activity() if self.to_block is not None else 'End'})"
-    
+
     def inverted(self):
         return Link(self.why, self.to_block, self.from_block)
 
@@ -61,7 +65,7 @@ class Block:
     _from: List[Link]
 
     def __init__(
-        self, process: "Process", activity: str, trigger: Optional[List[str] | str] = None
+        self, process: "Process", activity: str, triggers: Optional[List[str]] = None
     ):
         """_summary_
 
@@ -78,11 +82,7 @@ class Block:
         self.__process = process
         self.__activity = activity
         self.__process._append_block(self)
-        if trigger is None or hasattr(trigger, '__iter__'):
-            self.__triggers = trigger
-        elif isinstance(trigger, str):
-            self.__triggers = [trigger]
-        self.__triggers = trigger
+        self.__triggers = triggers
         self.__links = []
         self.__who = dict()
         self.__with_what = []
@@ -216,7 +216,7 @@ class Block:
 
     def all_connected_blocks(self, include_subprocess: bool = False) -> List["Block"]:
         return Block.recursive_all_connected_blocks(self, [], include_subprocess)
-    
+
     def recursive_all_connected_blocks_in_link_direction(block: "Block", current_list: List["Block"]) -> List["Block"]:
         if block is None or block in current_list:
             return current_list
@@ -225,11 +225,11 @@ class Block:
             current_list = Block.recursive_all_connected_blocks_in_link_direction(
                 to_block.to_block, current_list)
         return current_list
-    
+
     def all_connected_block_in_link_direction(self) -> List["Block"]:
         return Block.recursive_all_connected_blocks_in_link_direction(self, [])
-    
-    def recursive_find_block_in_all_connected_blocks_in_link_direction(block : "Block", visited_blocks: Optional[List["Block"]] = None) -> bool:
+
+    def recursive_find_block_in_all_connected_blocks_in_link_direction(block: "Block", visited_blocks: Optional[List["Block"]] = None) -> bool:
         found = False
         if visited_blocks is None:
             visited_blocks = []
@@ -239,7 +239,8 @@ class Block:
             if links.to_block is block:
                 return True
             visited_blocks.append(links.to_block)
-            found = found | Block.recursive_find_block_in_all_connected_blocks_in_link_direction(links.to_block, visited_blocks)
+            found = found | Block.recursive_find_block_in_all_connected_blocks_in_link_direction(
+                links.to_block, visited_blocks)
         return found
 
     def connect_end(self, why: str):
@@ -258,8 +259,8 @@ class Block:
         """
         self.disconnect(why)
 
-    def connect_new(self, why: str, activity: str, trigger: Optional[str] = None) -> "Block":
-        block = self.__process.add_block(activity, trigger)
+    def connect_new(self, why: str, activity: str, triggers: Optional[List[str]] = None) -> "Block":
+        block = self.__process.add_block(activity, triggers)
         self.connect(why, block)
         return block
 
@@ -426,3 +427,160 @@ class Block:
 
     def systems(self) -> List[str]:
         return self.with_whats()
+
+    def activity_height(self, width: Optional[int] = None) -> int:
+        if width is None:
+            width = self.calculate_width()
+        inner_width = width - 2 * X_PADDING - STROKE_WIDTH
+        activity_lines = fit_text_to_width(self.activity(), inner_width)
+
+        activity_lines = max(1, len(activity_lines))
+        return activity_lines * LINE_HEIGHT
+
+    def who_height(self) -> int:
+        who_count = len(self.__who)
+        return min(who_count, 1) * INNER_STROKE_WIDTH + who_count * LINE_HEIGHT + min(who_count, 1) * INNER_PADDING
+
+    def with_what_height(self) -> int:
+        with_what_count = len(self.__with_what)
+        return min(with_what_count, 1) * INNER_STROKE_WIDTH + with_what_count * LINE_HEIGHT + min(with_what_count, 1) * INNER_PADDING
+
+    def calculate_height(self, width: Optional[int] = None) -> int:
+        return self.activity_height(width) + self.who_height() + self.with_what_height() + 2*Y_PADDING + STROKE_WIDTH
+
+    def calculate_width(self) -> int:
+        width = MIN_WIDTH
+        for system in self.__with_what:
+            width = max(width, text_width(system))
+        for who, rasci in self.__who.items():
+            rasci_pad = 0
+            if rasci & RASCI.RESPONSIBLE:
+                rasci_pad = rasci_pad + 16
+            if rasci & RASCI.ACCOUNTABLE:
+                rasci_pad = rasci_pad + 16
+            if rasci & RASCI.SUPPORT:
+                rasci_pad = rasci_pad + 16
+            if rasci & RASCI.CONSULTED:
+                rasci_pad = rasci_pad + 16
+            if rasci & RASCI.INFORMED:
+                rasci_pad = rasci_pad + 16
+            width = max(width, text_width(who) + rasci_pad +
+                        (0 if rasci_pad == 0 else CHARWIDTH_LUT[' ']))
+        for word in self.__activity.split(" "):
+            width = max(width, text_width(word))
+        return width + 2 * X_PADDING + STROKE_WIDTH
+    
+    def calculate_output_textbox_width(self) -> int:
+        max_width = MIN_LINK_TEXT_WIDTH
+        for text in sorted([link.why for link in self.links()], key=lambda why: text_width(why), reverse=True):
+            width = text_width(text) + 2* INNER_PADDING
+            if width > max_width:
+                splitted_why = text.split(" ")
+                if len(splitted_why) > 1:    
+                    first_line = ""
+                    last_line = ""
+                    first_index = 0
+                    last_index = len(splitted_why) - 1
+                    while first_index <= last_index:
+                        if text_width(first_line) <= text_width(last_line):
+                            first_line = first_line + (" " if len(first_line) > 0 else "") + splitted_why[first_index]
+                            first_index = first_index + 1
+                        else:
+                            last_line = (" " if len(last_line) > 0 else "") + splitted_why[last_index] + last_line
+                            last_index = last_index - 1
+                    max_width = max(text_width(first_line), text_width(last_line)) + 2 * INNER_PADDING
+                else:
+                    max_width = width
+        return max_width
+    
+    def calculate_input_textbox_width(self) -> int:
+        if self.triggers() is None:
+            return 0
+        max_width = MIN_LINK_TEXT_WIDTH
+        for text in sorted(self.triggers(), key=lambda why: text_width(why), reverse=True):
+            width = text_width(text) + 2 * INNER_PADDING
+            if width > max_width:
+                splitted_why = text.split(" ")
+                if len(splitted_why) > 1:
+                    first_line = ""
+                    last_line = ""
+                    first_index = 0
+                    last_index = len(splitted_why) - 1
+                    while first_index <= last_index:
+                        if text_width(first_line) <= text_width(last_line):
+                            first_line = first_line + \
+                                (" " if len(first_line) > 0 else "") + \
+                                splitted_why[first_index]
+                            first_index = first_index + 1
+                        else:
+                            last_line = (" " if len(last_line) > 0 else "") + \
+                                splitted_why[last_index] + last_line
+                            last_index = last_index - 1
+                    max_width = max(text_width(first_line), text_width(
+                        last_line)) + 2 * INNER_PADDING
+                else:
+                    max_width = width
+        return max_width
+
+
+    def to_svg(self, width: int, height: int):
+        elements = [svg.Rect(
+            stroke=MAIN_COLOR,
+            stroke_width=STROKE_WIDTH,
+            width=width,
+            height=height,
+            fill="white",
+            rx=RX
+        )]
+
+        corner_path = svg.Path(d=f"M0,{Y_PADDING * 2}L0,{RX}Q0 0 {RX} 0L{Y_PADDING * 2},0L0,{Y_PADDING * 2}Z",
+                               stroke=MAIN_COLOR, stroke_width=STROKE_WIDTH, fill=MAIN_COLOR)
+
+        corner_text = svg.Text(x=RX, y=RX / 2 + LINE_HEIGHT / 2, elements=[
+                               str(self.get_id() + 1)], style=("fill: white" if self.__subprocess is not None else "fill: " + MAIN_COLOR), dominant_baseline="middle")
+
+        attachment_corner = svg.G(transform=f"translate({width - ATTACHMENT_SIZE - (RX / 2)}, {RX / 2}) scale({ATTACHMENT_SIZE / 512}, {ATTACHMENT_SIZE / 512})", elements=[svg.Path(
+            d="M216.08 192v143.85a40.08 40.08 0 0080.15 0l.13-188.55a67.94 67.94 0 10-135.87 0v189.82a95.51 95.51 0 10191 0V159.74", fill="none", stroke_width="32", stroke_miterlimit="10", stroke_linecap="round", stroke=ATTACHMENT_COLOR)])
+
+        if self.__subprocess is not None:
+            elements.append(corner_path)
+        elements.append(corner_text)
+        elements.append(attachment_corner)
+
+        inner_width = width - X_PADDING * 2 - STROKE_WIDTH
+
+        who_height = self.who_height()
+        with_what_height = self.with_what_height()
+
+        activity_y = Y_PADDING + STROKE_WIDTH / 2
+
+        for activity_line in fit_text_to_width(self.activity(), inner_width):
+            elements.append(svg.Text(x=width / 2, y=activity_y + LINE_HEIGHT / 2,
+                            dominant_baseline="middle", text_anchor="middle", elements=[activity_line]))
+            activity_y = activity_y + LINE_HEIGHT
+
+        next_y = activity_y + Y_PADDING
+
+        if who_height > 0:
+            next_y = next_y + (INNER_STROKE_WIDTH / 2)
+            elements.append(svg.Path(d=f"M{STROKE_WIDTH / 2},{next_y} L{width - STROKE_WIDTH / 2},{
+                            next_y}Z", stroke=ATTACHMENT_COLOR, stroke_width=INNER_STROKE_WIDTH))
+            next_y = next_y + (INNER_STROKE_WIDTH / 2) + INNER_PADDING
+            for who, rasci in self.__who.items():
+                elements.append(svg.Text(x=width / 2, y=next_y + LINE_HEIGHT/2,
+                                dominant_baseline="middle", text_anchor="middle", elements=[who], fill=WHO_COLOR))
+                next_y = next_y + LINE_HEIGHT
+            next_y + INNER_PADDING
+
+        if with_what_height > 0:
+            next_y = next_y + (INNER_STROKE_WIDTH / 2)
+            elements.append(svg.Path(d=f"M{STROKE_WIDTH / 2},{next_y} L{width - STROKE_WIDTH / 2},{
+                            next_y}Z", stroke=ATTACHMENT_COLOR, stroke_width=INNER_STROKE_WIDTH))
+            next_y = next_y + (INNER_STROKE_WIDTH / 2) + INNER_PADDING
+            for with_what in self.__with_what:
+                elements.append(svg.Text(x=width / 2, y=next_y + LINE_HEIGHT/2,
+                                dominant_baseline="middle", text_anchor="middle", elements=[with_what], fill=WITH_WHAT_COLOR))
+                next_y = next_y + LINE_HEIGHT
+
+        return svg.G(elements=elements)
+        # return svg.G(elements=)
